@@ -14,7 +14,7 @@ CHANNELS = ["ProxyMTProto", "MTProto_Proxy", "proxymtproto_ru"]
 PROXY_REGEX = r"tg://proxy\?server=([^&\"]+)&(?:amp;)?port=([0-9]+)&(?:amp;)?secret=([^&\"\s<]+)"
 
 # Настройки краудсорсинга
-REPORT_THRESHOLD = 2  # Сколько уникальных жалоб нужно для бана прокси
+REPORT_THRESHOLD = 1  # Сколько уникальных жалоб нужно для бана прокси
 BAN_DURATION = 30 * 60  # Время бана в секундах (30 минут)
 
 # Хранилища состояния (в оперативной памяти)
