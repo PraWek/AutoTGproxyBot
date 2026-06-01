@@ -27,7 +27,7 @@ PROXY_REGEX = r"tg://proxy\?server=([^&\"]+)&(?:amp;)?port=([0-9]+)&(?:amp;)?sec
 
 # Параметры таймингов
 CACHE_UPDATE_INTERVAL = 180  # Обновлять кэш раз в 3 минуты (180 сек)
-REPORT_THRESHOLD = 2  # Жалоб для бана
+REPORT_THRESHOLD = 1  # Жалоб для бана
 BAN_DURATION = 45 * 60  # Бан на 45 минут
 
 # --- ГЛОБАЛЬНЫЕ ХРАНИЛИЩА СОСТОЯНИЯ (КЭШ) ---
