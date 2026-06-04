@@ -65,5 +65,5 @@ async def proxy_updater_worker():
             tasks = [check_proxy(s, p, sec) for s, p, sec in found]
             results = await asyncio.gather(*tasks)
             live = sorted([r for r in results if r], key=lambda x: x['rank'])
-            CACHED_BEST_PROXIES = live[:15]
-        await asyncio.sleep(300)
+            CACHED_BEST_PROXIES = live[:30]
+        await asyncio.sleep(180)  # 3 мин
