@@ -227,15 +227,22 @@ async def proxy_updater_worker():
             # 5. КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Сохраняем ВСЕ найденные рабочие прокси (не только топ-50)
             # Это позволяет БД расти и хранить много прокси
             saved_count = 0
+            failed_count = 0
             for proxy in live_proxies:
-                await save_or_update_proxy(proxy)
-                saved_count += 1
+                result = await save_or_update_proxy(proxy)
+                if result:
+                    saved_count += 1
+                else:
+                    failed_count += 1
 
-            logger.info(f"Saved/Updated {saved_count} proxies in database")
+            logger.info(f"Saved/Updated {saved_count} proxies, failed: {failed_count}")
 
             # 6. Обновляем кеш из БД (берём топ-50 для быстрого доступа)
             CACHED_BEST_PROXIES = await get_live_proxies(limit=50)
             logger.info(f"Cached top-50 proxies: {len(CACHED_BEST_PROXIES)}")
+
+            if len(CACHED_BEST_PROXIES) == 0:
+                logger.warning("WARNING: No proxies in database cache! Check database connection.")
 
             # 7. Логируем общее количество прокси в БД
             total_count = await get_proxy_count()
