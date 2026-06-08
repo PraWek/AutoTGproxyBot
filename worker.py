@@ -5,7 +5,7 @@ import hashlib
 import logging
 from aiohttp import ClientSession
 from config import BOT_TOKEN
-from db import init_db, save_proxy, get_live_proxies, cleanup_dead_proxies
+from db import init_db, save_or_update_proxy, get_live_proxies, cleanup_dead_proxies, get_proxy_count, close_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -195,7 +195,7 @@ async def proxy_updater_worker():
 
     # Инициализируем базу данных при запуске
     await init_db()
-    logger.info("Database initialized")
+    logger.info("Database initialized with Render PostgreSQL")
 
     while True:
         try:
@@ -224,17 +224,24 @@ async def proxy_updater_worker():
             live_proxies = [r for r in results if r]
             logger.info(f"Live proxies: {len(live_proxies)}")
 
-            # 5. Сортируем по рейтингу и берём топ-50
-            sorted_proxies = sorted(live_proxies, key=lambda x: x['rank'])
-            CACHED_BEST_PROXIES = sorted_proxies[:50]
+            # 5. КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Сохраняем ВСЕ найденные рабочие прокси (не только топ-50)
+            # Это позволяет БД расти и хранить много прокси
+            saved_count = 0
+            for proxy in live_proxies:
+                await save_or_update_proxy(proxy)
+                saved_count += 1
 
-            # 6. Сохраняем в базу данных
-            for proxy in CACHED_BEST_PROXIES:
-                await save_proxy(proxy)
+            logger.info(f"Saved/Updated {saved_count} proxies in database")
 
-            logger.info(f"Saved {len(CACHED_BEST_PROXIES)} proxies to database")
+            # 6. Обновляем кеш из БД (берём топ-50 для быстрого доступа)
+            CACHED_BEST_PROXIES = await get_live_proxies(limit=50)
+            logger.info(f"Cached top-50 proxies: {len(CACHED_BEST_PROXIES)}")
 
-            # 7. Восстанавливаем прокси со истёкшей блокировкой
+            # 7. Логируем общее количество прокси в БД
+            total_count = await get_proxy_count()
+            logger.info(f"Total proxies in database: {total_count}")
+
+            # 8. Восстанавливаем прокси со истёкшей блокировкой
             await cleanup_dead_proxies()
 
         except Exception as e:
