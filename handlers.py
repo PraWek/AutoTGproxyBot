@@ -5,12 +5,14 @@ from aiogram.exceptions import TelegramBadRequest
 import worker
 import time
 import logging
+from db import get_live_proxies, mark_dead, get_proxy_by_id
 
 router = Router()
 
 
 @router.message(Command("start"))
 async def cmd_start(message):
+    """Обработчик команды /start - приветствие пользователя"""
     text = (
         "👋 **Добро пожаловать в Anti-DPI Proxy Bot!**\n\n"
         "Я — умный алгоритм, который сканирует каналы и оценивает способность прокси "
@@ -24,14 +26,17 @@ async def cmd_start(message):
 
 @router.message(Command("proxy"))
 async def cmd_proxy(message):
-    # Берем чистые прокси из кэша
-    active_proxies = [p for p in worker.CACHED_BEST_PROXIES if p['id'] not in worker.banned_proxies]
-    display_proxies = active_proxies[:5]
+    """Обработчик команды /proxy - отправить топ-5 лучших прокси"""
+    # Получаем активные прокси из базы данных
+    active_proxies = await get_live_proxies(limit=5)
+    # Фильтруем заблокированные пользователем прокси
+    display_proxies = [p for p in active_proxies if p['id'] not in worker.banned_proxies][:5]
 
     if not display_proxies:
         return await message.answer(
             "🔍 База стабильных прокси обновляется. Воркер ищет новые сервера, попробуйте через пару минут!")
 
+    # Собираем кнопки с прокси и кнопками отчёта
     kb = []
     for p in display_proxies:
         url = f"tg://proxy?server={p['server']}&port={p['port']}&secret={p['secret']}"
@@ -48,37 +53,41 @@ async def cmd_proxy(message):
 
 @router.callback_query(F.data.startswith("rep:"))
 async def report(callback):
+    """Обработчик нажатия кнопки «Не работает» - заменить прокси"""
     target_pid = callback.data.split(":")[1]
 
-    # 1. Заносим прокси в блеклист на 2 часа
+    # Заносим прокси в чёрный список на 2 часа
     if target_pid not in worker.banned_proxies:
         worker.banned_proxies[target_pid] = time.time() + 7200
 
-    # 2. Получаем текущую клавиатуру сообщения, которую видит юзер
+    # Отмечаем прокси как неработающий в БД
+    await mark_dead(target_pid, 7200)
+
+    # Получаем текущую клавиатуру сообщения
     old_markup = callback.message.reply_markup
     if not old_markup:
         return await callback.answer("Ошибка: клавиатура устарела.", show_alert=True)
 
-    # 3. Собираем ID всех прокси, которые СЕЙЧАС отображаются на экране
+    # Собираем ID всех прокси на экране
     current_pids = []
     for row in old_markup.inline_keyboard:
         for btn in row:
             if btn.callback_data and btn.callback_data.startswith("rep:"):
                 current_pids.append(btn.callback_data.split(":")[1])
 
-    # 4. Ищем один новый прокси из резерва, которого еще НЕТ на экране
+    # Ищем новый рабочий прокси из резерва
     new_proxy = None
-    for p in worker.CACHED_BEST_PROXIES:
+    all_proxies = await get_live_proxies(limit=100)
+    for p in all_proxies:
         if p['id'] not in worker.banned_proxies and p['id'] not in current_pids:
             new_proxy = p
             break
 
-    # 5. Точечно пересобираем клавиатуру (меняем только 2 нужных ряда)
+    # Пересобираем клавиатуру с заменой неработающего прокси
     new_keyboard = []
     for i in range(0, len(old_markup.inline_keyboard), 2):
         row1 = old_markup.inline_keyboard[i]
 
-        # Проверка границ на случай аномалий в разметке
         if i + 1 < len(old_markup.inline_keyboard):
             row2 = old_markup.inline_keyboard[i + 1]
         else:
@@ -87,25 +96,24 @@ async def report(callback):
 
         btn_rep = row2[0]
 
-        # Нашли прокси, на который нажал юзер
+        # Если это строка, которую нажал пользователь
         if btn_rep.callback_data == f"rep:{target_pid}":
-            if new_proxy:  # Если есть замена
+            if new_proxy:
+                # Заменяем на новый рабочий прокси
                 url = f"tg://proxy?server={new_proxy['server']}&port={new_proxy['port']}&secret={new_proxy['secret']}"
                 new_row1 = [InlineKeyboardButton(text=f"🟢 {new_proxy['ping']}мс | ТСПУ: {new_proxy['tspu']}%", url=url)]
                 new_row2 = [
                     InlineKeyboardButton(text="❌ Не работает (Заменить)", callback_data=f"rep:{new_proxy['id']}")]
                 new_keyboard.append(new_row1)
                 new_keyboard.append(new_row2)
-            else:
-                # Если резерв пуст, просто не добавляем эти ряды (прокси исчезнет с экрана)
-                pass
+            # Если замены нет, просто удаляем неработающий прокси
         else:
-            # Чужие прокси оставляем нетронутыми на своих местах!
+            # Остальные прокси оставляем на месте
             new_keyboard.append(row1)
             new_keyboard.append(row2)
 
-    # 6. Обновляем сообщение
     try:
+        # Обновляем сообщение с новой клавиатурой
         await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=new_keyboard))
 
         if new_proxy:
@@ -114,7 +122,7 @@ async def report(callback):
             await callback.answer("Прокси удален. Резервных серверов пока нет.", show_alert=True)
 
     except TelegramBadRequest:
-        # Изящно перехватываем ошибку двойного клика пользователя
+        # Перехватываем двойной клик
         await callback.answer("Этот прокси уже заменен.", show_alert=False)
     except Exception as e:
         logging.error(f"UI update error: {e}")
